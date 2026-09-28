@@ -18,10 +18,13 @@ class _SetupScreenState extends State<SetupScreen> {
   String _statusMessage = 'Ready to download components.';
   double _progress = 0.0;
 
-  // Placeholder URLs - YOU MUST HOST ACTUAL ARM64 BIONIC BINARIES HERE!
+      // Placeholder URLs - YOU MUST HOST ACTUAL ARM64 BIONIC BINARIES HERE!
   final String nginxUrl = "https://example.com/packages/nginx-android-arm64.zip";
   final String phpUrl = "https://example.com/packages/php-android-arm64.zip";
   final String mariadbUrl = "https://example.com/packages/mariadb-android-arm64.zip";
+  final String nodeUrl = "https://example.com/packages/nodejs-android-arm64.zip";
+  final String gitUrl = "https://example.com/packages/git-android-arm64.zip";
+  final String composerUrl = "https://getcomposer.org/download/latest-stable/composer.phar";
 
   Future<void> _startSetup() async {
     setState(() {
@@ -33,16 +36,23 @@ class _SetupScreenState extends State<SetupScreen> {
       final Directory appDocDir = await getApplicationSupportDirectory();
       final String basePath = appDocDir.path;
 
-      // 1. Download & Extract Nginx
       await _downloadAndExtract(nginxUrl, basePath, 'Nginx');
-      
-      // 2. Download & Extract PHP
       await _downloadAndExtract(phpUrl, basePath, 'PHP');
-      
-      // 3. Download & Extract MariaDB
       await _downloadAndExtract(mariadbUrl, basePath, 'MariaDB');
+      await _downloadAndExtract(nodeUrl, basePath, 'Node.js');
+      await _downloadAndExtract(gitUrl, basePath, 'Git');
+      
+      // Download Composer (which is just a phar file, not a zip)
+      setState(() => _statusMessage = 'Downloading Composer...');
+      final composerRes = await http.get(Uri.parse(composerUrl));
+      if(composerRes.statusCode == 200) {
+         final composerFile = File('$basePath/bin/composer.phar');
+         composerFile.createSync(recursive: true);
+         composerFile.writeAsBytesSync(composerRes.bodyBytes);
+         Process.runSync('chmod', ['+x', composerFile.path]);
+      }
 
-      // 4. Mark setup as complete
+      // Mark setup as complete
       final prefs = await SharedPreferences.getInstance();
       await prefs.setBool('is_setup_complete', true);
 
