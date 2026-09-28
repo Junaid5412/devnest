@@ -3,6 +3,14 @@ import '../services/native_bridge.dart';
 import 'projects_screen.dart';
 import 'terminal_screen.dart';
 import 'file_manager_screen.dart';
+import 'database_manager_screen.dart';
+import 'php_manager_screen.dart';
+import 'laravel_wizard_screen.dart';
+import 'wordpress_wizard_screen.dart';
+import 'git_manager_screen.dart';
+import 'ssl_manager_screen.dart';
+import 'logs_viewer_screen.dart';
+import 'settings_screen.dart';
 
 class DashboardScreen extends StatefulWidget {
   const DashboardScreen({super.key});
@@ -82,7 +90,12 @@ class _HomeTabState extends State<HomeTab> {
       appBar: AppBar(
         title: const Text('DevNest', style: TextStyle(fontWeight: FontWeight.bold)),
         actions: [
-          IconButton(icon: const Icon(Icons.settings), onPressed: () {}),
+          IconButton(
+            icon: const Icon(Icons.settings), 
+            onPressed: () {
+              Navigator.push(context, MaterialPageRoute(builder: (context) => const SettingsScreen()));
+            }
+          ),
         ],
       ),
       body: SingleChildScrollView(
@@ -98,18 +111,13 @@ class _HomeTabState extends State<HomeTab> {
             const SizedBox(height: 24),
             const Text('QUICK ACTIONS', style: TextStyle(fontSize: 16, fontWeight: FontWeight.bold, color: Colors.grey)),
             const SizedBox(height: 12),
-            ListTile(
-              leading: const Icon(Icons.update),
-              title: const Text('Update Components'),
-              subtitle: const Text('Check for Nginx, PHP, MariaDB updates'),
-              onTap: () {},
-            ),
-             ListTile(
-              leading: const Icon(Icons.text_snippet),
-              title: const Text('View Logs'),
-              subtitle: const Text('View access and error logs'),
-              onTap: () {},
-            ),
+            _buildActionTile(context, Icons.install_desktop, 'Install WordPress', 'Quickly deploy a WordPress instance', const WordPressWizardScreen()),
+            _buildActionTile(context, Icons.api, 'Create Laravel Project', 'Setup a Laravel environment', const LaravelWizardScreen()),
+            _buildActionTile(context, Icons.security, 'SSL Manager', 'Manage Local HTTPS', const SslManagerScreen()),
+            _buildActionTile(context, Icons.integration_instructions, 'Git Integration', 'Manage Git Repositories', const GitManagerScreen()),
+            _buildActionTile(context, Icons.data_usage, 'Database Manager', 'Manage MariaDB & phpMyAdmin', const DatabaseManagerScreen()),
+            _buildActionTile(context, Icons.code, 'PHP Manager', 'PHP extensions & php.ini', const PhpManagerScreen()),
+            _buildActionTile(context, Icons.text_snippet, 'View Logs', 'View access and error logs', const LogsViewerScreen()),
           ],
         ),
       ),
@@ -120,6 +128,17 @@ class _HomeTabState extends State<HomeTab> {
         backgroundColor: _isServiceRunning ? Colors.red.shade700 : Colors.green.shade700,
         foregroundColor: Colors.white,
       ),
+    );
+  }
+
+  Widget _buildActionTile(BuildContext context, IconData icon, String title, String subtitle, Widget destination) {
+    return ListTile(
+      leading: Icon(icon),
+      title: Text(title),
+      subtitle: Text(subtitle),
+      onTap: () {
+        Navigator.push(context, MaterialPageRoute(builder: (context) => destination));
+      },
     );
   }
 
