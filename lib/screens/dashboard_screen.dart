@@ -1,5 +1,8 @@
 import 'package:flutter/material.dart';
 import '../services/native_bridge.dart';
+import 'projects_screen.dart';
+import 'terminal_screen.dart';
+import 'file_manager_screen.dart';
 
 class DashboardScreen extends StatefulWidget {
   const DashboardScreen({super.key});
@@ -12,6 +15,48 @@ class _DashboardScreenState extends State<DashboardScreen> {
   int _selectedIndex = 0;
   bool _isServiceRunning = false;
 
+  final List<Widget> _pages = [
+    const HomeTab(),
+    const ProjectsScreen(),
+    const TerminalScreen(),
+    const FileManagerScreen(),
+  ];
+
+  @override
+  Widget build(BuildContext context) {
+    return Scaffold(
+      body: IndexedStack(
+        index: _selectedIndex,
+        children: _pages,
+      ),
+      bottomNavigationBar: NavigationBar(
+        selectedIndex: _selectedIndex,
+        onDestinationSelected: (index) {
+          setState(() {
+            _selectedIndex = index;
+          });
+        },
+        destinations: const [
+          NavigationDestination(icon: Icon(Icons.dashboard), label: 'Dashboard'),
+          NavigationDestination(icon: Icon(Icons.folder), label: 'Projects'),
+          NavigationDestination(icon: Icon(Icons.terminal), label: 'Terminal'),
+          NavigationDestination(icon: Icon(Icons.file_copy), label: 'Files'),
+        ],
+      ),
+    );
+  }
+}
+
+// Extract Home Tab into its own widget to keep dashboard clean
+class HomeTab extends StatefulWidget {
+  const HomeTab({super.key});
+  @override
+  State<HomeTab> createState() => _HomeTabState();
+}
+
+class _HomeTabState extends State<HomeTab> {
+  bool _isServiceRunning = false;
+
   void _toggleServices() async {
     bool result = false;
     if (_isServiceRunning) {
@@ -20,15 +65,15 @@ class _DashboardScreenState extends State<DashboardScreen> {
       result = await NativeBridge.startServerService();
     }
     
-    // Optimistic UI update or wait for actual status. 
-    // For now, assuming success if no exception was thrown.
     setState(() {
       _isServiceRunning = !_isServiceRunning;
     });
     
-    ScaffoldMessenger.of(context).showSnackBar(
-      SnackBar(content: Text(_isServiceRunning ? 'Servers Started' : 'Servers Stopped')),
-    );
+    if(mounted) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(content: Text(_isServiceRunning ? 'Servers Started' : 'Servers Stopped')),
+      );
+    }
   }
 
   @override
@@ -37,10 +82,7 @@ class _DashboardScreenState extends State<DashboardScreen> {
       appBar: AppBar(
         title: const Text('DevNest', style: TextStyle(fontWeight: FontWeight.bold)),
         actions: [
-          IconButton(
-            icon: const Icon(Icons.settings),
-            onPressed: () {},
-          ),
+          IconButton(icon: const Icon(Icons.settings), onPressed: () {}),
         ],
       ),
       body: SingleChildScrollView(
@@ -54,25 +96,22 @@ class _DashboardScreenState extends State<DashboardScreen> {
             const SizedBox(height: 12),
             _buildServiceCards(),
             const SizedBox(height: 24),
-            const Text('PROJECTS', style: TextStyle(fontSize: 16, fontWeight: FontWeight.bold, color: Colors.grey)),
+            const Text('QUICK ACTIONS', style: TextStyle(fontSize: 16, fontWeight: FontWeight.bold, color: Colors.grey)),
             const SizedBox(height: 12),
-            _buildProjectList(),
+            ListTile(
+              leading: const Icon(Icons.update),
+              title: const Text('Update Components'),
+              subtitle: const Text('Check for Nginx, PHP, MariaDB updates'),
+              onTap: () {},
+            ),
+             ListTile(
+              leading: const Icon(Icons.text_snippet),
+              title: const Text('View Logs'),
+              subtitle: const Text('View access and error logs'),
+              onTap: () {},
+            ),
           ],
         ),
-      ),
-      bottomNavigationBar: NavigationBar(
-        selectedIndex: _selectedIndex,
-        onDestinationSelected: (index) {
-          setState(() {
-            _selectedIndex = index;
-          });
-        },
-        destinations: const [
-          NavigationDestination(icon: Icon(Icons.home), label: 'Home'),
-          NavigationDestination(icon: Icon(Icons.folder), label: 'Projects'),
-          NavigationDestination(icon: Icon(Icons.terminal), label: 'Terminal'),
-          NavigationDestination(icon: Icon(Icons.memory), label: 'Services'),
-        ],
       ),
       floatingActionButton: FloatingActionButton.extended(
         onPressed: _toggleServices,
@@ -136,33 +175,7 @@ class _DashboardScreenState extends State<DashboardScreen> {
         subtitle: Text(status),
         trailing: Switch(
           value: isRunning,
-          onChanged: (val) {
-            // Individual toggle placeholder
-          },
-        ),
-      ),
-    );
-  }
-
-  Widget _buildProjectList() {
-    return Column(
-      children: [
-        _buildProjectTile('WordPress Test', 'PHP 8.2 • MySQL', Icons.language),
-        _buildProjectTile('Laravel API', 'PHP 8.2 • Port 8000', Icons.api),
-      ],
-    );
-  }
-
-  Widget _buildProjectTile(String name, String details, IconData icon) {
-    return Card(
-      margin: const EdgeInsets.only(bottom: 8),
-      child: ListTile(
-        leading: Icon(icon, size: 32),
-        title: Text(name, style: const TextStyle(fontWeight: FontWeight.bold)),
-        subtitle: Text(details),
-        trailing: IconButton(
-          icon: const Icon(Icons.open_in_new),
-          onPressed: () {},
+          onChanged: (val) {},
         ),
       ),
     );
