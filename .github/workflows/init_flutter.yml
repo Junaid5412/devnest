@@ -1,0 +1,38 @@
+name: Initialize Flutter Project
+
+on:
+  push:
+    branches:
+      - main
+    paths:
+      - 'trigger_init.txt'
+  workflow_dispatch:
+
+jobs:
+  init:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+
+    steps:
+      - name: Checkout Repository
+        uses: actions/checkout@v4
+        with:
+          token: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Setup Flutter
+        uses: subosito/flutter-action@v2
+        with:
+          channel: 'stable'
+
+      - name: Create Flutter App
+        run: |
+          flutter create --org com.devnest --project-name devnest .
+          
+      - name: Commit and Push
+        run: |
+          git config --global user.name "github-actions[bot]"
+          git config --global user.email "github-actions[bot]@users.noreply.github.com"
+          git add .
+          git commit -m "Initialize base Flutter project via GitHub Actions"
+          git push
