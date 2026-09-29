@@ -22,7 +22,12 @@ class _LaravelWizardScreenState extends State<LaravelWizardScreen> {
   @override
   void initState() {
     super.initState();
-    _port = WebServerManager.findAvailablePort(startFrom: 8000);
+    _assignPort();
+  }
+
+  Future<void> _assignPort() async {
+    final port = await ProjectManager.getUniquePort(startFrom: 8000);
+    setState(() => _port = port);
   }
 
   Future<void> _createLaravelProject() async {

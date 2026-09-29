@@ -25,7 +25,12 @@ class _WordPressWizardScreenState extends State<WordPressWizardScreen> {
   @override
   void initState() {
     super.initState();
-    _port = WebServerManager.findAvailablePort(startFrom: 8081);
+    _assignPort();
+  }
+
+  Future<void> _assignPort() async {
+    final port = await ProjectManager.getUniquePort(startFrom: 8081);
+    setState(() => _port = port);
   }
 
   Future<void> _installWordPress() async {
