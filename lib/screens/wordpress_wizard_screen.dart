@@ -3,7 +3,8 @@ import 'package:flutter/material.dart';
 import 'package:http/http.dart' as http;
 import 'package:archive/archive.dart';
 import 'package:path_provider/path_provider.dart';
-import '../services/nginx_config_manager.dart';
+import '../services/project_manager.dart';
+import '../services/web_server.dart';
 
 class WordPressWizardScreen extends StatefulWidget {
   const WordPressWizardScreen({super.key});
@@ -15,88 +16,121 @@ class WordPressWizardScreen extends StatefulWidget {
 class _WordPressWizardScreenState extends State<WordPressWizardScreen> {
   final _siteNameController = TextEditingController();
   final _dbNameController = TextEditingController();
-  final _usernameController = TextEditingController();
-  final _passwordController = TextEditingController();
-  
+  int _port = 8081;
+
   bool _isInstalling = false;
+  double _progress = 0;
   String _status = '';
 
+  @override
+  void initState() {
+    super.initState();
+    _port = WebServerManager.findAvailablePort(startFrom: 8081);
+  }
+
   Future<void> _installWordPress() async {
+    if (_siteNameController.text.trim().isEmpty) {
+      ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('Please enter a site name.')));
+      return;
+    }
+
     setState(() {
       _isInstalling = true;
-      _status = 'Downloading WordPress...';
+      _status = 'Downloading WordPress (this may take a minute)...';
+      _progress = 0;
     });
 
     try {
-      final docDir = await getApplicationDocumentsDirectory();
-      final projectDir = Directory('${docDir.path}/projects/${_siteNameController.text.replaceAll(' ', '_').toLowerCase()}');
-      
-      if (projectDir.existsSync()) {
-        throw Exception('Project directory already exists!');
-      }
+      // Create project entry
+      final project = await ProjectManager.createProject(
+        name: _siteNameController.text.trim(),
+        type: 'WordPress',
+        port: _port,
+      );
+
+      final projectDir = project['path'] as String;
 
       // Download WordPress
-      final response = await http.get(Uri.parse('https://wordpress.org/latest.zip'));
-      if (response.statusCode != 200) throw Exception('Failed to download WordPress');
-
-      setState(() => _status = 'Extracting files...');
+      final request = http.Request('GET', Uri.parse('https://wordpress.org/latest.zip'));
+      final response = await http.Client().send(request);
       
-      // Extract Archive
-      final archive = ZipDecoder().decodeBytes(response.bodyBytes);
+      if (response.statusCode != 200) throw Exception('Failed to download WordPress (HTTP ${response.statusCode})');
+
+      List<int> bytes = [];
+      int totalBytes = response.contentLength ?? 0;
+      int receivedBytes = 0;
+
+      await for (var chunk in response.stream) {
+        bytes.addAll(chunk);
+        receivedBytes += chunk.length;
+        if (totalBytes > 0) {
+          setState(() => _progress = receivedBytes / totalBytes);
+        }
+      }
+
+      setState(() {
+        _status = 'Extracting WordPress files...';
+        _progress = 0;
+      });
+
+      final archive = ZipDecoder().decodeBytes(bytes);
+      int fileCount = 0;
       for (final file in archive) {
         final filename = file.name;
         if (file.isFile) {
           final data = file.content as List<int>;
-          // WordPress zip contains a 'wordpress/' folder at root, we strip it out
           final relativePath = filename.replaceFirst(RegExp(r'^wordpress/'), '');
           if (relativePath.isEmpty) continue;
-          
-          final outFile = File('${projectDir.path}/$relativePath');
+
+          final outFile = File('$projectDir/$relativePath');
           outFile.createSync(recursive: true);
           outFile.writeAsBytesSync(data);
+          fileCount++;
+          if (fileCount % 50 == 0) {
+            setState(() => _progress = fileCount / archive.length);
+          }
         } else {
-           final relativePath = filename.replaceFirst(RegExp(r'^wordpress/'), '');
-           if (relativePath.isNotEmpty) {
-             Directory('${projectDir.path}/$relativePath').createSync(recursive: true);
-           }
+          final relativePath = filename.replaceFirst(RegExp(r'^wordpress/'), '');
+          if (relativePath.isNotEmpty) {
+            Directory('$projectDir/$relativePath').createSync(recursive: true);
+          }
         }
       }
 
-      setState(() => _status = 'Configuring Database & wp-config.php...');
+      setState(() => _status = 'Configuring WordPress...');
 
-      // 1. Create Database via local mysql binary
-      final appSupportDir = await getApplicationSupportDirectory();
-      final mysqlBin = '${appSupportDir.path}/bin/mysql';
-      
-      if (File(mysqlBin).existsSync()) {
-        await Process.run(mysqlBin, ['-u', 'root', '-e', 'CREATE DATABASE IF NOT EXISTS `${_dbNameController.text}`;']);
-      }
-
-      // 2. Create wp-config.php
-      final sampleConfig = File('${projectDir.path}/wp-config-sample.php');
+      // Configure wp-config.php
+      final sampleConfig = File('$projectDir/wp-config-sample.php');
       if (sampleConfig.existsSync()) {
         String configContent = sampleConfig.readAsStringSync();
-        configContent = configContent.replaceAll('database_name_here', _dbNameController.text);
+        final dbName = _dbNameController.text.isNotEmpty ? _dbNameController.text : 'wordpress';
+        configContent = configContent.replaceAll('database_name_here', dbName);
         configContent = configContent.replaceAll('username_here', 'root');
         configContent = configContent.replaceAll('password_here', '');
         configContent = configContent.replaceAll('localhost', '127.0.0.1');
-        
-        File('${projectDir.path}/wp-config.php').writeAsStringSync(configContent);
+        File('$projectDir/wp-config.php').writeAsStringSync(configContent);
       }
 
-      // 3. Configure Nginx Virtual Host
-      await NginxConfigManager.addVirtualHost(
-        projectName: _siteNameController.text,
-        port: int.tryParse('8080') ?? 8080,
-        documentRoot: projectDir.path,
-        isPhp: true,
+      // Auto-start the web server for this project
+      final server = await WebServerManager.startServer(
+        project['safeName'],
+        projectDir,
+        _port,
       );
+      await ProjectManager.updateProjectStatus(project['safeName'], server.isRunning ? 'running' : 'stopped');
 
       setState(() {
         _isInstalling = false;
-        _status = 'Installation Complete! You can now start the server.';
+        _status = server.isRunning
+            ? 'WordPress installed and running at ${server.url}'
+            : 'WordPress installed! Start it from the Projects tab.';
       });
 
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(content: Text('WordPress ready at http://127.0.0.1:$_port')),
+        );
+      }
     } catch (e) {
       setState(() {
         _isInstalling = false;
@@ -113,27 +147,42 @@ class _WordPressWizardScreenState extends State<WordPressWizardScreen> {
         padding: const EdgeInsets.all(16.0),
         child: ListView(
           children: [
-            TextField(controller: _siteNameController, decoration: const InputDecoration(labelText: 'Site Folder Name', border: OutlineInputBorder())),
+            TextField(
+              controller: _siteNameController,
+              decoration: const InputDecoration(labelText: 'Site Name', hintText: 'My WordPress Site', border: OutlineInputBorder()),
+            ),
             const SizedBox(height: 16),
-            TextField(controller: _usernameController, decoration: const InputDecoration(labelText: 'Admin Username', border: OutlineInputBorder())),
+            TextField(
+              controller: _dbNameController,
+              decoration: const InputDecoration(labelText: 'Database Name (optional)', hintText: 'wordpress', border: OutlineInputBorder()),
+            ),
             const SizedBox(height: 16),
-            TextField(controller: _passwordController, obscureText: true, decoration: const InputDecoration(labelText: 'Admin Password', border: OutlineInputBorder())),
-            const SizedBox(height: 16),
-            TextField(controller: _dbNameController, decoration: const InputDecoration(labelText: 'Database Name', border: OutlineInputBorder())),
+            TextField(
+              decoration: InputDecoration(labelText: 'Port', border: const OutlineInputBorder()),
+              keyboardType: TextInputType.number,
+              controller: TextEditingController(text: '$_port'),
+              onChanged: (val) => _port = int.tryParse(val) ?? _port,
+            ),
+            const SizedBox(height: 8),
+            Text(
+              'Your site will be at: http://127.0.0.1:$_port',
+              style: const TextStyle(color: Colors.lightBlueAccent, fontStyle: FontStyle.italic),
+            ),
             const SizedBox(height: 32),
             if (_isInstalling) ...[
-              const Center(child: CircularProgressIndicator()),
+              LinearProgressIndicator(value: _progress > 0 ? _progress : null),
               const SizedBox(height: 16),
-              Center(child: Text(_status, style: const TextStyle(fontWeight: FontWeight.bold))),
+              Center(child: Text(_status, style: const TextStyle(fontWeight: FontWeight.bold), textAlign: TextAlign.center)),
             ] else ...[
-              ElevatedButton(
+              ElevatedButton.icon(
                 onPressed: _installWordPress,
-                style: ElevatedButton.styleFrom(padding: const EdgeInsets.all(16)),
-                child: const Text('INSTALL WORDPRESS'),
+                icon: const Icon(Icons.download),
+                label: const Text('DOWNLOAD & INSTALL WORDPRESS'),
+                style: ElevatedButton.styleFrom(padding: const EdgeInsets.all(16), backgroundColor: Colors.blue.shade700, foregroundColor: Colors.white),
               ),
               if (_status.isNotEmpty) ...[
                 const SizedBox(height: 16),
-                Center(child: Text(_status, style: const TextStyle(color: Colors.green))),
+                Center(child: Text(_status, style: const TextStyle(color: Colors.green), textAlign: TextAlign.center)),
               ]
             ]
           ],

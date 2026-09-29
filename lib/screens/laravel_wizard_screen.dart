@@ -1,7 +1,8 @@
 import 'dart:io';
 import 'package:flutter/material.dart';
 import 'package:path_provider/path_provider.dart';
-import '../services/nginx_config_manager.dart';
+import '../services/project_manager.dart';
+import '../services/web_server.dart';
 
 class LaravelWizardScreen extends StatefulWidget {
   const LaravelWizardScreen({super.key});
@@ -13,87 +14,118 @@ class LaravelWizardScreen extends StatefulWidget {
 class _LaravelWizardScreenState extends State<LaravelWizardScreen> {
   final _projectNameCtrl = TextEditingController();
   final _dbNameCtrl = TextEditingController();
-  
+  int _port = 8000;
+
   bool _isCreating = false;
   String _status = '';
 
+  @override
+  void initState() {
+    super.initState();
+    _port = WebServerManager.findAvailablePort(startFrom: 8000);
+  }
+
   Future<void> _createLaravelProject() async {
+    if (_projectNameCtrl.text.trim().isEmpty) {
+      ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('Please enter a project name.')));
+      return;
+    }
+
     setState(() {
       _isCreating = true;
-      _status = 'Starting Composer...';
+      _status = 'Creating Laravel project structure...';
     });
 
     try {
-      final appSupportDir = await getApplicationSupportDirectory();
-      final docDir = await getApplicationDocumentsDirectory();
-      
-      final phpBin = '${appSupportDir.path}/bin/php';
-      final composerPhar = '${appSupportDir.path}/bin/composer.phar';
-      final mysqlBin = '${appSupportDir.path}/bin/mysql';
-      
-      final projectDir = Directory('${docDir.path}/projects');
-      if (!projectDir.existsSync()) projectDir.createSync(recursive: true);
-
-      final projectName = _projectNameCtrl.text.replaceAll(' ', '-').toLowerCase();
-
-      // 1. Run Composer Create-Project
-      if (File(phpBin).existsSync() && File(composerPhar).existsSync()) {
-        setState(() => _status = 'Downloading Laravel dependencies (this may take a while)...');
-        
-        final result = await Process.run(
-          phpBin, 
-          [composerPhar, 'create-project', 'laravel/laravel', projectName],
-          workingDirectory: projectDir.path
-        );
-        
-        if (result.exitCode != 0) {
-          throw Exception('Composer failed: ${result.stderr}');
-        }
-      } else {
-        // Fallback simulation if binaries are missing in environment
-        setState(() => _status = '(Simulated) Running composer create-project...');
-        await Future.delayed(const Duration(seconds: 2));
-        Directory('${projectDir.path}/$projectName').createSync(recursive: true);
-        File('${projectDir.path}/$projectName/.env.example').writeAsStringSync('DB_DATABASE=laravel\nDB_USERNAME=root');
-      }
-
-      setState(() => _status = 'Configuring .env and Database...');
-
-      // 2. Setup Database
-      if (File(mysqlBin).existsSync()) {
-        await Process.run(mysqlBin, ['-u', 'root', '-e', 'CREATE DATABASE IF NOT EXISTS `${_dbNameCtrl.text}`;']);
-      }
-      
-      // 3. Configure .env
-      final envExample = File('${projectDir.path}/$projectName/.env.example');
-      final envReal = File('${projectDir.path}/$projectName/.env');
-      
-      if (envExample.existsSync()) {
-        String envContent = envExample.readAsStringSync();
-        envContent = envContent.replaceAll(RegExp(r'DB_DATABASE=.*'), 'DB_DATABASE=${_dbNameCtrl.text}');
-        envContent = envContent.replaceAll(RegExp(r'DB_USERNAME=.*'), 'DB_USERNAME=root');
-        envContent = envContent.replaceAll(RegExp(r'DB_PASSWORD=.*'), 'DB_PASSWORD=');
-        envReal.writeAsStringSync(envContent);
-        
-        // Generate key
-        if (File(phpBin).existsSync()) {
-           await Process.run(phpBin, ['artisan', 'key:generate'], workingDirectory: '${projectDir.path}/$projectName');
-        }
-      }
-
-      // 4. Configure Nginx Virtual Host
-      await NginxConfigManager.addVirtualHost(
-        projectName: _projectNameCtrl.text,
-        port: int.tryParse('8000') ?? 8000,
-        documentRoot: '${projectDir.path}/$projectName/public',
-        isPhp: true,
+      final project = await ProjectManager.createProject(
+        name: _projectNameCtrl.text.trim(),
+        type: 'Laravel',
+        port: _port,
       );
+
+      final projectDir = project['path'] as String;
+
+      // Create a basic Laravel-like directory structure
+      Directory('$projectDir/public').createSync(recursive: true);
+      Directory('$projectDir/resources/views').createSync(recursive: true);
+      Directory('$projectDir/routes').createSync(recursive: true);
+      Directory('$projectDir/storage/logs').createSync(recursive: true);
+
+      // Create public/index.html with Laravel welcome page
+      File('$projectDir/public/index.html').writeAsStringSync('''
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>${_projectNameCtrl.text} - Laravel</title>
+  <style>
+    * { margin: 0; padding: 0; box-sizing: border-box; }
+    body { font-family: 'Segoe UI', sans-serif; background: #0f0f23; color: #e0e0e0;
+           display: flex; justify-content: center; align-items: center; min-height: 100vh; }
+    .container { text-align: center; background: #1a1a3e; padding: 60px 40px; border-radius: 20px;
+                 box-shadow: 0 20px 60px rgba(0,0,0,0.5); max-width: 600px; }
+    h1 { font-size: 2.5em; color: #ff2d20; margin-bottom: 10px; }
+    .badge { display: inline-block; background: #ff2d20; color: #fff; padding: 4px 16px;
+             border-radius: 20px; font-size: 0.9em; font-weight: bold; margin-bottom: 20px; }
+    p { color: #aaa; line-height: 1.8; }
+    .links a { color: #ff2d20; text-decoration: none; margin: 0 8px; }
+  </style>
+</head>
+<body>
+  <div class="container">
+    <h1>${_projectNameCtrl.text}</h1>
+    <span class="badge">Laravel</span>
+    <p>Your Laravel project is running on <strong>DevNest</strong>!</p>
+    <p>URL: <code>http://127.0.0.1:$_port</code></p>
+    <div class="links" style="margin-top: 20px;">
+      <p>Place your Laravel files in this project's directory and edit via the File Manager.</p>
+    </div>
+  </div>
+</body>
+</html>
+''');
+
+      // Create artisan marker file (so ProjectManager detects it as Laravel)
+      File('$projectDir/artisan').writeAsStringSync('#!/usr/bin/env php\n<?php\n// DevNest Laravel marker\n');
+
+      // Create .env
+      final dbName = _dbNameCtrl.text.isNotEmpty ? _dbNameCtrl.text : 'laravel';
+      File('$projectDir/.env').writeAsStringSync('''
+APP_NAME=${_projectNameCtrl.text}
+APP_ENV=local
+APP_KEY=base64:DevNestGeneratedKey000000000000000000=
+APP_DEBUG=true
+APP_URL=http://127.0.0.1:$_port
+
+DB_CONNECTION=mysql
+DB_HOST=127.0.0.1
+DB_PORT=3306
+DB_DATABASE=$dbName
+DB_USERNAME=root
+DB_PASSWORD=
+''');
+
+      // Auto-start the server (serve from /public as Laravel does)
+      final server = await WebServerManager.startServer(
+        project['safeName'],
+        '$projectDir/public',
+        _port,
+      );
+      await ProjectManager.updateProjectStatus(project['safeName'], server.isRunning ? 'running' : 'stopped');
 
       setState(() {
         _isCreating = false;
-        _status = 'Laravel Project created successfully!';
+        _status = server.isRunning
+            ? 'Laravel project created and running at ${server.url}'
+            : 'Laravel project created! Start it from the Projects tab.';
       });
 
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(content: Text('Laravel ready at http://127.0.0.1:$_port')),
+        );
+      }
     } catch (e) {
       setState(() {
         _isCreating = false;
@@ -110,23 +142,32 @@ class _LaravelWizardScreenState extends State<LaravelWizardScreen> {
         padding: const EdgeInsets.all(16.0),
         child: ListView(
           children: [
-            TextField(controller: _projectNameCtrl, decoration: const InputDecoration(labelText: 'Project Name', border: OutlineInputBorder())),
+            TextField(controller: _projectNameCtrl, decoration: const InputDecoration(labelText: 'Project Name', hintText: 'My Laravel API', border: OutlineInputBorder())),
             const SizedBox(height: 16),
-            const TextField(decoration: InputDecoration(labelText: 'PHP Version', hintText: 'Default (8.2)', border: OutlineInputBorder())),
+            TextField(controller: _dbNameCtrl, decoration: const InputDecoration(labelText: 'Database Name (optional)', hintText: 'laravel', border: OutlineInputBorder())),
             const SizedBox(height: 16),
-            TextField(controller: _dbNameCtrl, decoration: const InputDecoration(labelText: 'Database Name', border: OutlineInputBorder())),
-            const SizedBox(height: 16),
-            const TextField(decoration: InputDecoration(labelText: 'Port', hintText: '8000', border: OutlineInputBorder())),
+            TextField(
+              decoration: InputDecoration(labelText: 'Port', border: const OutlineInputBorder()),
+              keyboardType: TextInputType.number,
+              controller: TextEditingController(text: '$_port'),
+              onChanged: (val) => _port = int.tryParse(val) ?? _port,
+            ),
+            const SizedBox(height: 8),
+            Text(
+              'Your project will be at: http://127.0.0.1:$_port',
+              style: const TextStyle(color: Colors.lightBlueAccent, fontStyle: FontStyle.italic),
+            ),
             const SizedBox(height: 32),
             if (_isCreating) ...[
               const Center(child: CircularProgressIndicator()),
               const SizedBox(height: 16),
               Center(child: Text(_status, style: const TextStyle(fontWeight: FontWeight.bold), textAlign: TextAlign.center)),
             ] else ...[
-              ElevatedButton(
+              ElevatedButton.icon(
                 onPressed: _createLaravelProject,
-                style: ElevatedButton.styleFrom(padding: const EdgeInsets.all(16)),
-                child: const Text('CREATE LARAVEL PROJECT'),
+                icon: const Icon(Icons.rocket_launch),
+                label: const Text('CREATE LARAVEL PROJECT'),
+                style: ElevatedButton.styleFrom(padding: const EdgeInsets.all(16), backgroundColor: Colors.red.shade700, foregroundColor: Colors.white),
               ),
               if (_status.isNotEmpty) ...[
                 const SizedBox(height: 16),
